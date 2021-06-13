@@ -4,12 +4,13 @@
   (:import [java.awt RenderingHints]
            [java.io File ByteArrayInputStream ByteArrayOutputStream]
            [java.nio.charset StandardCharsets]
-           [org.apache.batik.anim.dom SAXSVGDocumentFactory]
+           [org.apache.batik.anim.dom SAXSVGDocumentFactory SVGOMDocument SVGOMSVGElement SVGOMAnimatedLength]
            [org.apache.batik.transcoder TranscoderInput TranscoderOutput SVGAbstractTranscoder]
-           [org.apache.batik.transcoder.image PNGTranscoder JPEGTranscoder TIFFTranscoder]))
+           [org.apache.batik.transcoder.image PNGTranscoder JPEGTranscoder TIFFTranscoder]
+           [org.apache.batik.gvt.renderer ImageRenderer]))
 
 (defn- get-high-quality-hints []
-  (let [add-hint (fn [hints k v] (.add hints (RenderingHints. k v)))]
+  (let [add-hint (fn [^java.awt.RenderingHints hints k v] (.add hints (RenderingHints. k v)))]
     (doto (RenderingHints. nil nil)
       (add-hint RenderingHints/KEY_ALPHA_INTERPOLATION RenderingHints/VALUE_ALPHA_INTERPOLATION_QUALITY)
       (add-hint RenderingHints/KEY_INTERPOLATION       RenderingHints/VALUE_INTERPOLATION_BICUBIC)
@@ -24,34 +25,38 @@
 (defn- high-quality-png-transcoder []
   (proxy [PNGTranscoder] []
     (createRenderer []
-      (let [renderer (proxy-super createRenderer)]
+      (let [^ImageRenderer renderer (proxy-super createRenderer)]
         (.setRenderingHints renderer (get-high-quality-hints))
         renderer))))
 
 (defn- high-quality-tiff-transcoder []
   (proxy [TIFFTranscoder] []
     (createRenderer []
-      (let [renderer (proxy-super createRenderer)]
-        (.setRenderingHints renderer (get-high-quality-hints))
-        renderer))))
+      (let [^ImageRenderer renderer (proxy-super createRenderer)]
+        (do
+          (println (type renderer))
+          (.setRenderingHints renderer (get-high-quality-hints))
+          renderer)))))
 
 (defn- high-quality-jpeg-transcoder []
   (proxy [JPEGTranscoder] []
     (createRenderer []
-      (let [renderer (proxy-super createRenderer)]
+      (let [^ImageRenderer renderer (proxy-super createRenderer)]
         (.setRenderingHints renderer (get-high-quality-hints))
         renderer))))
 
-(defn- document-dimensions [svg-document]
-  (let [root-element (-> svg-document .getRootElement)]
-    {:width  (-> root-element .getWidth .getCheckedValue)
-     :height (-> root-element .getHeight .getCheckedValue)}))
+(defn- document-dimensions [^SVGOMDocument svg-document]
+  (let [root-element (-> svg-document .getRootElement)
+        ^SVGOMAnimatedLength width (-> root-element .getWidth)
+        ^SVGOMAnimatedLength height (-> root-element .getHeight)]
+    {:width  (-> width .getCheckedValue)
+     :height (-> height .getCheckedValue)}))
 
 (defn parse-svg-uri [uri]
   (let [factory (SAXSVGDocumentFactory. "org.apache.xerces.parsers.SAXParser")]
     (.createDocument factory uri)))
 
-(defn parse-svg-string [s]
+(defn parse-svg-string [^String s]
   (let [factory (SAXSVGDocumentFactory. "org.apache.xerces.parsers.SAXParser")]
     (with-open [in (ByteArrayInputStream. (.getBytes s StandardCharsets/UTF_8))]
       (.createDocument factory nil in))))
@@ -59,7 +64,7 @@
 (defn render-svg-document
   ([svg-document filename]
    (render-svg-document svg-document filename {}))
-  ([svg-document filename options]
+  ([^org.w3c.dom.Document svg-document filename options]
    (let [extenstion (keyword (last (str/split (str filename) #"\.")))
          dimensions (document-dimensions svg-document)
 
@@ -68,12 +73,11 @@
          scale (or (:scale options) 1)
          width (or (:width options) (:width dimensions))
 
-         transcoder (case type
-                      (:jpeg :jpg) (high-quality-jpeg-transcoder)
-                      (:tiff :tif) (high-quality-tiff-transcoder)
-                      (:png) (high-quality-png-transcoder)
-                      nil)]
-
+         ^SVGAbstractTranscoder transcoder (case type
+                                             (:jpeg :jpg) (high-quality-jpeg-transcoder)
+                                             (:tiff :tif) (high-quality-tiff-transcoder)
+                                             (:png) (high-quality-png-transcoder)
+                                             nil)]
      (cond
        (not transcoder)
        (throw (ex-info "Cannot transcode - unable to select transcoder for reqested type"
@@ -84,17 +88,17 @@
                         :dimensions dimensions})))
 
      (when (instance? JPEGTranscoder transcoder)
-       (.addTranscodingHint transcoder JPEGTranscoder/KEY_QUALITY (float quality)))
+       (.addTranscodingHint ^JPEGTranscoder transcoder JPEGTranscoder/KEY_QUALITY (float quality)))
 
      (.addTranscodingHint transcoder SVGAbstractTranscoder/KEY_WIDTH (float (* scale width)))
 
-     (with-open [out-stream (if filename
-                              (io/output-stream filename)
-                              (ByteArrayOutputStream.))]
+     (with-open [^java.io.OutputStream out-stream (if filename
+                                                    (io/output-stream filename)
+                                                    (ByteArrayOutputStream.))]
        (let [in (TranscoderInput. svg-document)
              out (TranscoderOutput. out-stream)]
          (.transcode transcoder in out)
-         (or filename (.toByteArray out-stream)))))))
+         (or filename (.toByteArray ^ByteArrayOutputStream out-stream)))))))
 
 (defn render-svg-uri
   ([uri filename]

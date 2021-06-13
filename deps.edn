@@ -1,0 +1,7 @@
+{:deps
+ {org.clojure/clojure {:mvn/version "1.10.0"},
+  xerces/xerces {:mvn/version "2.4.0"},
+  org.apache.xmlgraphics/batik-transcoder {:mvn/version "1.14", :exclusions [[xerces/xercesImpl]]}, 
+  org.apache.xmlgraphics/batik-codec {:mvn/version "1.14"}, 
+  org.apache.xmlgraphics/batik-anim {:mvn/version "1.14"}, 
+  org.apache.xmlgraphics/xmlgraphics-commons {:mvn/version "2.3"}}}
